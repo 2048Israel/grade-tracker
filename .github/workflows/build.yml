@@ -24,10 +24,13 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         shell: python
         run: |
-          import gradetracker, sys
+          import re, sys
+          text = open("gradetracker/__init__.py", encoding="utf-8").read()
+          version = re.search(r'__version__ = "([^"]+)"', text)[1]
           tag = "${{ github.ref_name }}"
-          if tag != "v" + gradetracker.__version__:
-              sys.exit(f"Tag {tag} doesn't match __version__ {gradetracker.__version__}: the app would keep offering itself as an update.")
+          if tag != "v" + version:
+              sys.exit(f"Tag {tag} doesn't match __version__ {version}: the app would keep offering itself as an update.")
+          print(f"Tag {tag} matches __version__ {version}.")
 
       - name: Install PyInstaller
         run: python -m pip install -r packaging/requirements-build.txt
