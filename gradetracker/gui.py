@@ -1972,7 +1972,7 @@ class UpdateDialog(Dialog):
     def __init__(self, app: App, release):
         super().__init__(app, "Update Grade Tracker", 640, 540)
         px = app.px
-        self.release, self.progress = release, (0, 0)
+        self.release, self.progress, self.done = release, (0, 0), False
         b = self.body
         app.heading(b, f"Grade Tracker v{release.version} is available").pack(anchor="w")
         ttk.Label(b, text=f"You have v{__version__}. Your courses, marks and transcript stay exactly as they are: "
@@ -2008,7 +2008,7 @@ class UpdateDialog(Dialog):
         self.progress = (done, total)
 
     def tick(self):
-        if not self.app.updating or not self.winfo_exists():
+        if self.done or not self.app.updating or not self.winfo_exists():
             return
         done, total = self.progress
         if total:
@@ -2037,6 +2037,7 @@ class UpdateDialog(Dialog):
             self.bar.pack_forget()
             self.status.config(text=str(result), fg=BAD)
             return
+        self.done = True
         self.bar["value"] = 100
         self.status.config(text="Installed. Restarting…", fg=GOOD)
         try:

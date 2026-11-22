@@ -130,6 +130,45 @@ class Window(Folder):
         finally:
             root.destroy()
 
+    def test_update_button_downloads_installs_and_restarts(self):
+        try:
+            import tkinter as tk
+            root = tk.Tk()
+        except Exception as e:
+            self.skipTest(f"no Tk display: {e}")
+        import time
+        from unittest import mock
+        from gradetracker import gui, updater
+        new_exe = Path(self.tmp.name) / "GradeTracker.exe"
+        release = updater.Release({"tag_name": "v99.0.0", "body": "Faster.", "assets": [
+            {"name": "GradeTracker.exe", "size": 3, "browser_download_url": "x"}]})
+
+        def fake_download(rel, progress=None):
+            progress(3, 3)
+            return Path(self.tmp.name) / "new.download"
+        with mock.patch.object(updater, "can_self_update", return_value=True), \
+                mock.patch.object(updater, "download", side_effect=fake_download), \
+                mock.patch.object(updater, "install", return_value=new_exe) as install, \
+                mock.patch.object(updater, "restart") as restart:
+            app = gui.App(root, self.lib, calm=True)
+            app.show_release(release)
+            dialog = gui.UpdateDialog(app, release)
+            dialog.start()
+            self.assertTrue(app.updating)
+            deadline = time.time() + 5
+            while not restart.called and time.time() < deadline:
+                root.update()
+                time.sleep(0.02)
+            install.assert_called_once()
+            self.assertEqual(restart.call_args[0][0], new_exe)   # the new .exe is started...
+            time.sleep(0.5)
+            try:
+                root.update()                                     # ...and this one closes
+                closed = not root.winfo_exists()
+            except tk.TclError:
+                closed = True
+            self.assertTrue(closed)
+
 
 if __name__ == "__main__":
     unittest.main()
