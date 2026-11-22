@@ -1,0 +1,31 @@
+{
+  "format": "grade-tracker-transcript",
+  "version": 1,
+  "school": "Example University",
+  "default_credits": 3,
+  "terms": [
+    {
+      "term": "Fall 2025",
+      "courses": [
+        {"code": "BIOL 1010", "title": "Introduction to Biology", "letter": "A-"},
+        {"code": "MATH 1210", "title": "Calculus I", "letter": "B+"},
+        {"code": "ENGL 1000", "title": "Academic Writing", "letter": "A"},
+        {"code": "HIST 1100", "title": "World History", "letter": "W"}
+      ],
+      "term_gpa": 3.67,
+      "cumulative_gpa": 3.67
+    },
+    {
+      "term": "Winter 2026",
+      "courses": [
+        {"code": "BIOL 1020", "title": "Cells and Genetics", "letter": "A"},
+        {"code": "MATH 1220", "title": "Calculus II", "letter": "B"},
+        {"code": "CHEM 1010", "title": "General Chemistry", "letter": "B+"},
+        {"code": "PSYC 1000", "title": "Introduction to Psychology", "letter": "A+"}
+      ],
+      "term_gpa": 3.65,
+      "cumulative_gpa": 3.66
+    }
+  ],
+  "standing": {"credit_hours": 21, "quality_points": 76.8, "cumulative_gpa": 3.66, "as_of": "Apr 2026"}
+}

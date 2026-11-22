@@ -1,0 +1,22 @@
+{
+  "format": "grade-tracker-course",
+  "version": 1,
+  "code": "DEMO 1010",
+  "title": "Example Course (remove it when you're done)",
+  "term": "Fall 2026",
+  "credits": 3,
+  "components": [
+    {"id": "quizzes", "label": "Weekly quizzes (best 8 of 10)", "weight": 20, "best": 8,
+     "items": [{"name": "Quiz 1", "mark": 90}, {"name": "Quiz 2", "mark": 75}, {"name": "Quiz 3", "mark": 100},
+               {"name": "Quiz 4"}, {"name": "Quiz 5"}, {"name": "Quiz 6"}, {"name": "Quiz 7"},
+               {"name": "Quiz 8"}, {"name": "Quiz 9"}, {"name": "Quiz 10"}]},
+    {"id": "labs", "label": "Lab reports", "weight": 15, "type": "points",
+     "items": [{"name": "Lab 1", "max": 10, "due": "Sep 18", "mark": 8.5}, {"name": "Lab 2", "max": 10, "due": "Oct 2"},
+               {"name": "Lab 3", "max": 20, "due": "Oct 30"}]},
+    {"id": "participation", "label": "Participation", "weight": 5, "type": "attendance", "free_misses": 2,
+     "items": [{"name": "Day 1", "present": true}, {"name": "Day 2", "present": true}, {"name": "Day 3", "present": false}]},
+    {"id": "midterm", "label": "Midterm (Oct 21)", "weight": 25, "role": "exam", "items": [{"name": "Midterm", "due": "Oct 21", "mark": 71}]},
+    {"id": "final", "label": "Final exam (cumulative)", "weight": 35, "role": "exam", "items": [{"name": "Final"}], "must_pass": 50}
+  ],
+  "notes": ["This is a made-up course so you can try the app. Log a mark for Quiz 4, then watch the needs change."]
+}
