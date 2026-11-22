@@ -119,6 +119,11 @@ class Window(Folder):
             root.update()
             self.assertEqual(len(app.book.data["log"]), 1)
             gui.SettingsDialog(app).destroy()
+            from gradetracker import updater
+            app.show_release(updater.Release({"tag_name": "v99.0.0", "body": "Faster.", "assets": []}))
+            self.assertIn("Update", app.update_btn.cget("text"))
+            self.assertEqual(app.release.version, "99.0.0")
+            gui.UpdateDialog(app, app.release).destroy()
             for view in ("marks", "gpa", "past"):
                 app.show_view(view)
                 root.update()

@@ -7,6 +7,7 @@
     python -m gradetracker status                    # every course: standing and what it needs
     python -m gradetracker gpa --what-if A- "BIOL 1010=B+"
     python -m gradetracker report grades.html        # the printable report
+    GradeTracker.exe update                          # install the latest release
 """
 from __future__ import annotations
 
@@ -15,7 +16,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import __version__, coursefile as cf, prompt
+from . import __version__, coursefile as cf, prompt, updater
 from .engine import (GradeError, clear_mark, course_report, flag_item, fnum, gpa_json, gpa_report, graded,
                      item_hint, log_mark, past_course_json, past_course_report, term_json, term_report,
                      terms_report, what_if)
@@ -97,6 +98,9 @@ def main(argv=None) -> int:
     rp = sub.add_parser("report", help="write the printable HTML report")
     rp.add_argument("out")
     sub.add_parser("where", help="print the data folder")
+    up = sub.add_parser("update", help="install the latest version of the .exe from GitHub")
+    up.add_argument("--check", action="store_true", help="only say whether a newer version exists")
+    up.add_argument("--restart", action="store_true", help="open the new version when it's installed")
 
     args = ap.parse_args(argv)
     lib = Library(args.data)
@@ -106,6 +110,24 @@ def main(argv=None) -> int:
             return 0
         if args.cmd == "where":
             print(lib.home)
+            return 0
+        if args.cmd == "update":
+            updater.cleanup()
+            release = updater.latest()
+            if not release.is_newer():
+                print(f"Grade Tracker {__version__} is the latest version.")
+                return 0
+            print(f"Grade Tracker {release.version} is available (you have {__version__}).")
+            if args.check:
+                print(release.page)
+                return 0
+            if not updater.can_self_update():
+                print(f"Running from source: update with `git pull`, or download it from {release.page}")
+                return 0
+            exe = updater.install(updater.download(release))
+            print(f"Updated {exe.name} to {release.version}. Your data is untouched.")
+            if args.restart:
+                updater.restart(exe, ["--data", args.data] if args.data else [])
             return 0
         if args.cmd in ("check", "import"):
             imp = cf.read_import(read_source(args.file))
@@ -188,7 +210,7 @@ def main(argv=None) -> int:
         print()
         print(course_report(change.course))
         return 0
-    except GradeError as e:
+    except (GradeError, updater.UpdateError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
     except OSError as e:

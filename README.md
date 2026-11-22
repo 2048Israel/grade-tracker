@@ -50,9 +50,13 @@ Import your unofficial transcript the same way: **Past semesters → Import tran
 - **Update from a new file**: if the AI got something wrong, fix it (or ask the AI to) and add the course again. Your marks carry over.
 - **Settings**: the term's name, which letters to show columns for, and your school's letter scale and grade points.
 
+## Updates
+
+When a new version is out, the version number at the top right turns into a green **⬆ Update** button. Click it, and the app downloads the new version from this repository's releases, checks it against the SHA-256 GitHub publishes, swaps itself out and restarts. Your data isn't touched. Clicking the version number at any other time checks for an update right away.
+
 ## Your data
 
-Everything stays on your computer, in `%APPDATA%\Grade Tracker` (**Settings → Open data folder**). The app never connects to the internet. The only thing that leaves your computer is what *you* give your own AI: your syllabus or transcript.
+Everything stays on your computer, in `%APPDATA%\Grade Tracker` (**Settings → Open data folder**). Your grades never leave it. The app's only network traffic is checking GitHub for a new version when it starts (you can turn this off in **Settings**) and downloading an update when you click **Update**. The only other thing that leaves your computer is what *you* give your own AI: your syllabus or transcript.
 
 ## Download and run
 
@@ -82,6 +86,7 @@ python -m gradetracker add "BIOL 1010" "Lab 3" 17/20  # marks: 85, 85%, 17/20, p
 python -m gradetracker status                         # standing and needs, every course
 python -m gradetracker gpa --what-if B+ "BIOL 1010=A-"
 python -m gradetracker report grades.html
+GradeTracker.exe update                               # install the latest release
 ```
 
 `GradeTracker.exe` takes the same commands. Add `--data FOLDER` to use another data folder.

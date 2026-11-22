@@ -1,7 +1,7 @@
 """Grade Tracker: turn a syllabus into a grade tracker that says what you need on the rest."""
 from pathlib import Path
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 DATA = Path(__file__).resolve().parent / "data"
 
 

@@ -16,8 +16,10 @@ import argparse
 import json
 import math
 import os
+import queue
 import re
 import sys
+import threading
 import traceback
 import webbrowser
 from pathlib import Path
@@ -25,7 +27,7 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, font as tkfont, messagebox, ttk
 
-from . import DATA, __version__, coursefile as cf, engine as g, juice as j, prompt
+from . import DATA, __version__, coursefile as cf, engine as g, juice as j, prompt, updater
 from .report import build_html
 from .store import Library
 
@@ -90,8 +92,11 @@ def documents_dir() -> Path:
 
 
 class App:
-    def __init__(self, root: tk.Tk, lib: Library, calm: bool = False):
+    def __init__(self, root: tk.Tk, lib: Library, calm: bool = False, check_updates: bool = False):
         self.root, self.lib = root, lib
+        self.jobs = queue.Queue()  # (callback, result) from background threads, run on Tk's thread
+        self.release = None        # a newer release found on GitHub
+        self.updating = False
         self.anim = j.Animator(root, enabled=not calm)
         self.grow = 1.0          # chart bars' growth, 0..1, tweened when the GPA view opens
         self.proj_shown = None   # (term GPA, cumulative) the chart's projected column is drawn at
@@ -118,6 +123,8 @@ class App:
         self.reload()
         self.show_view("marks")
         root.bind("<FocusIn>", self.on_focus)
+        if check_updates:
+            root.after(1500, lambda: self.check_for_update(quiet=True))
 
     def px(self, n):
         return int(round(n * self.scale))
@@ -192,6 +199,15 @@ class App:
         s.configure("Top.TButton", background=BG, foreground=TEXT, borderwidth=0, focusthickness=0,
                     font=self.f_bold, padding=(self.px(12), self.px(6)))
         s.map("Top.TButton", background=[("active", SELECT)])
+        s.configure("Version.TButton", background=BG, foreground=MUTED, borderwidth=0, focusthickness=0,
+                    font=self.f_small, padding=(self.px(8), self.px(6)))
+        s.map("Version.TButton", background=[("active", SELECT)], foreground=[("active", TEXT)])
+        s.configure("Update.TButton", background=MINT, foreground="#06101f", borderwidth=0, focusthickness=0,
+                    font=self.f_bold, padding=(self.px(14), self.px(6)))
+        s.map("Update.TButton", background=[("disabled", tint(MINT, 0.4)), ("active", "#6ff0c8")],
+              foreground=[("disabled", TEXT)])
+        s.configure("Mint.Horizontal.TProgressbar", troughcolor=FIELD, background=MINT, bordercolor=FIELD,
+                    lightcolor=MINT, darkcolor=MINT, thickness=self.px(8))
         s.configure("TopAccent.TButton", background=tint(ACCENT, 0.28), foreground=TEXT, borderwidth=0,
                     focusthickness=0, font=self.f_bold, padding=(self.px(14), self.px(6)))
         s.map("TopAccent.TButton", background=[("active", tint(ACCENT, 0.5))])
@@ -251,17 +267,18 @@ class App:
         self.nav.tag_lower("hit")
         self.pill_at = None
 
-        # Right: actions, today's cumulative as a coloured chip, then the view's subtitle.
+        # Right: actions, the version / update button, and today's cumulative as a coloured chip.
         ttk.Button(top, text="⚙", style="Top.TButton", command=self.open_settings, cursor="hand2",
                    width=2).pack(side="right", pady=(px(4), 0))
+        self.update_btn = ttk.Button(top, text=f"v{__version__}", style="Version.TButton", cursor="hand2",
+                                     command=self.on_update_click)
+        self.update_btn.pack(side="right", pady=(px(4), 0), padx=(0, px(4)))
         ttk.Button(top, text="Report", style="Top.TButton", command=self.export_report,
                    cursor="hand2").pack(side="right", pady=(px(4), 0), padx=(0, px(4)))
         ttk.Button(top, text="＋ Add course", style="TopAccent.TButton", command=lambda: self.open_import("syllabus"),
                    cursor="hand2").pack(side="right", pady=(px(4), 0), padx=(0, px(8)))
         self.chip = tk.Label(top, text="", bg=tint(MINT), fg=MINT, font=self.f_chip, padx=px(10), pady=px(4))
         self.chip.pack(side="right", pady=(px(4), 0), padx=(0, px(14)))
-        self.subtitle = tk.Label(top, text="", bg=BG, fg=MUTED, font=self.f_base)
-        self.subtitle.pack(side="right", padx=(0, px(12)), pady=(px(4), 0))
         for i, (key, _) in enumerate(VIEWS, start=1):
             r.bind(f"<Control-Key-{i}>", lambda e, k=key: self.show_view(k))
         r.bind("<Control-n>", lambda e: self.open_import("syllabus"))
@@ -396,8 +413,8 @@ class App:
         head = ttk.Frame(right, style="Flat.TFrame")
         head.grid(row=0, column=0, sticky="ew")
         self.heading(head, "Standing").pack(side="left")
-        ttk.Label(head, text="average needed on what's left", style="Hint.TLabel").pack(side="left",
-                                                                                     padx=(px(10), 0), pady=(px(2), 0))
+        self.standing_hint = ttk.Label(head, text="average needed on what's left", style="Hint.TLabel")
+        self.standing_hint.pack(side="left", padx=(px(10), 0), pady=(px(2), 0))
         self.target_chips = tk.Frame(head, bg=PANEL)
         self.target_chips.pack(side="right")
 
@@ -458,7 +475,7 @@ class App:
         view.grid(row=0, column=0, sticky="nsew")
         view.columnconfigure(0, weight=3)
         view.columnconfigure(1, weight=2)
-        view.rowconfigure(1, weight=1)
+        view.rowconfigure(1, weight=1, minsize=px(250))   # the chart never gets squeezed flat
 
         tiles = tk.Frame(view, bg=BG)
         tiles.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, px(14)))
@@ -740,17 +757,7 @@ class App:
         if not self.book:
             return
         tr = self.transcript
-        if self.view == "marks":
-            text = self.book.term if self.book.courses else "no courses yet"
-        elif self.tr_error:
-            text = "transcript.json didn't load"
-        elif not tr or tr.empty:
-            text = "no transcript imported"
-        elif self.view == "gpa":
-            text = tr.standing.get("as_of") or f"{g.fnum(tr.hours)} credit hours"
-        else:
-            text = f"{len(tr.terms)} term{'s' if len(tr.terms) != 1 else ''}"
-        self.subtitle.config(text=text)
+        self.standing_hint.config(text=f"{self.book.term} · average needed on what's left")
         if tr and tr.gpa is not None:
             colour = letter_colour(self.gpa_letter(tr.gpa))
             self.chip.config(text=f"CGPA  {g.fgpa(tr.gpa)}", fg=colour, bg=tint(colour, 0.2))
@@ -1061,7 +1068,7 @@ class App:
         self.tiles["qp"][2].config(text="grade points × credits, summed")
 
         # by subject
-        subjects = [s for s in tr.by_subject() if s["courses"]]
+        subjects = [s for s in tr.by_subject(limit=3) if s["courses"]]
         if not subjects:
             self.autowrap(tk.Label(self.subject_rows, text="Your GPA by subject shows up here once you import a "
                                                            "transcript.", bg=PANEL, fg=MUTED, font=self.f_small,
@@ -1076,12 +1083,12 @@ class App:
             self.meter(self.subject_rows, (row["gpa"] or 0) / self.top_points(), colour, px(120), px(8)).grid(
                 row=r, column=2, sticky="w", pady=pady)
             n = len(row["courses"])
-            if row["subject"] == "Other":
-                detail = f"{n} course{'s' if n != 1 else ''} · " + ", ".join(
-                    sorted({g.subject_of(code) for code, _ in row["courses"]}))
+            if row["subject"] == "Other":   # one line each, so the chart above keeps its room
+                subs = sorted({g.subject_of(code) for code, _ in row["courses"]})
+                detail = f"{n} course{'s' if n != 1 else ''} · " + ", ".join(subs[:5]) + (" …" if len(subs) > 5 else "")
             else:
-                detail = f"{n} course{'s' if n != 1 else ''} · " + " · ".join(
-                    f"{code.split()[-1]} {letter}" for code, letter in row["courses"])
+                shown = [f"{code.split()[-1]} {letter}" for code, letter in row["courses"]]
+                detail = f"{n} course{'s' if n != 1 else ''} · " + " · ".join(shown[:4]) + (" …" if n > 4 else "")
             self.autowrap(tk.Label(self.subject_rows, text=detail, bg=PANEL, fg=MUTED, font=self.f_small,
                                    anchor="w", justify="left"), 260).grid(row=r, column=3, sticky="ew",
                                                                          padx=(px(12), 0), pady=pady)
@@ -1686,6 +1693,78 @@ class App:
         except AttributeError:
             webbrowser.open(self.lib.home.as_uri())
 
+    # ------------------------------------------------------------------ updates
+    def in_background(self, work, done):
+        """Run work() on a thread; done(result_or_exception) then runs on Tk's thread."""
+        def run():
+            try:
+                result = work()
+            except Exception as e:   # handed to done() as the result
+                result = e
+            self.jobs.put((done, result))
+        self.pending = getattr(self, "pending", 0) + 1
+        threading.Thread(target=run, daemon=True).start()
+        if self.pending == 1:
+            self.root.after(100, self.poll_jobs)
+
+    def poll_jobs(self):
+        try:
+            while True:
+                done, result = self.jobs.get_nowait()
+                self.pending -= 1
+                done(result)
+        except queue.Empty:
+            pass
+        if self.pending > 0:
+            self.root.after(100, self.poll_jobs)
+
+    def check_for_update(self, quiet: bool = False):
+        """Ask GitHub for the latest release. quiet: say nothing unless there's a new version."""
+        if self.updating:
+            return
+        if not quiet:
+            self.update_btn.config(text="Checking…")
+
+        def done(result):
+            if isinstance(result, Exception):
+                self.update_btn.config(text=f"v{__version__}")
+                if not quiet:
+                    self.toast.show(str(result), WARN, icon="!", ms=5000)
+                return
+            if result.is_newer():
+                self.show_release(result, announce=True)
+            else:
+                self.update_btn.config(text=f"v{__version__}")
+                if not quiet:
+                    self.toast.show(f"You have the latest version (v{__version__}).", GOOD, icon="✓")
+        self.in_background(updater.latest, done)
+
+    def show_release(self, release, announce: bool = False):
+        """A newer version exists: the header button turns into a bright Update button."""
+        self.release = release
+        self.update_btn.config(text="⬆  Update", style="Update.TButton")
+        if announce:
+            self.toast.show(f"Grade Tracker v{release.version} is out. Click Update at the top to install it.",
+                            MINT, icon="⬆", ms=6000)
+            self.pulse_update()
+
+    def pulse_update(self):
+        """Three soft pulses so the new button gets noticed."""
+        s = ttk.Style(self.root)
+
+        def step(t):
+            s.configure("Update.TButton", background=j.mix(MINT, "#ffffff", 0.45 * abs(math.sin(t * 3 * math.pi))))
+        self.anim.run("update-pulse", 1800, step, ease=lambda t: t,
+                      done=lambda: s.configure("Update.TButton", background=MINT))
+
+    def on_update_click(self):
+        if self.updating:
+            return
+        if self.release:
+            UpdateDialog(self, self.release)
+        else:
+            self.check_for_update(quiet=False)
+
 
 class Dialog(tk.Toplevel):
     """A dark modal window with the app's look."""
@@ -1887,11 +1966,93 @@ class ImportDialog(Dialog):
         self.destroy()
 
 
+class UpdateDialog(Dialog):
+    """What's new, then download, swap and restart, with a progress bar."""
+
+    def __init__(self, app: App, release):
+        super().__init__(app, "Update Grade Tracker", 640, 540)
+        px = app.px
+        self.release, self.progress = release, (0, 0)
+        b = self.body
+        app.heading(b, f"Grade Tracker v{release.version} is available").pack(anchor="w")
+        ttk.Label(b, text=f"You have v{__version__}. Your courses, marks and transcript stay exactly as they are: "
+                          "they live in your data folder, not inside the app.",
+                  style="Hint.TLabel", wraplength=px(580), justify="left").pack(fill="x", pady=(px(6), px(12)))
+        self.label("WHAT'S NEW").pack(anchor="w", pady=(0, px(4)))
+        wrap, notes = self.text(10, readonly=True)
+        wrap.pack(fill="both", expand=True)
+        notes.config(state="normal")
+        notes.insert("1.0", release.notes or "See the release page for details.")
+        notes.config(state="disabled")
+        self.bar = ttk.Progressbar(b, style="Mint.Horizontal.TProgressbar", mode="determinate", maximum=100)
+        bottom = ttk.Frame(b, style="Flat.TFrame")
+        bottom.pack(fill="x", side="bottom", pady=(px(14), 0))
+        if updater.can_self_update():
+            self.go = ttk.Button(bottom, text="Update now", style="Update.TButton", command=self.start, cursor="hand2")
+        else:   # running from source: there's no .exe to swap
+            self.go = ttk.Button(bottom, text="Open the download page", style="Accent.TButton", cursor="hand2",
+                                 command=lambda: (webbrowser.open(release.page), self.destroy()))
+        self.go.pack(side="right")
+        self.later = ttk.Button(bottom, text="Later", command=self.destroy)
+        self.later.pack(side="right", padx=(0, px(8)))
+        if updater.can_self_update():
+            note = (f"{release.size / 1e6:.0f} MB · " if release.size else "") + "restarts when done"
+        else:
+            note = "Running from source: use git pull, or download the .exe."
+        self.status = tk.Label(bottom, text=note, bg=PANEL, fg=MUTED,
+                               font=app.f_small, anchor="w", justify="left", wraplength=px(330))
+        self.status.pack(side="left", fill="x", expand=True)
+        self.protocol("WM_DELETE_WINDOW", lambda: None if self.app.updating else self.destroy())
+
+    def set_progress(self, done, total):   # called from the download thread: only stores numbers
+        self.progress = (done, total)
+
+    def tick(self):
+        if not self.app.updating or not self.winfo_exists():
+            return
+        done, total = self.progress
+        if total:
+            self.bar["value"] = 100 * done / total
+            self.status.config(text=f"Downloading… {done / 1e6:.1f} of {total / 1e6:.1f} MB")
+        self.after(100, self.tick)
+
+    def start(self):
+        self.app.updating = True
+        self.go.state(["disabled"])
+        self.later.state(["disabled"])
+        self.app.update_btn.config(text="Updating…")
+        self.bar.pack(fill="x", side="bottom", pady=(self.app.px(12), 0))
+        self.status.config(text="Starting the download…", fg=TEXT)
+        self.tick()
+        release = self.release
+        self.app.in_background(lambda: updater.install(updater.download(release, self.set_progress)), self.finished)
+
+    def finished(self, result):
+        app = self.app
+        if isinstance(result, Exception):
+            app.updating = False
+            app.update_btn.config(text="⬆  Update")
+            self.go.state(["!disabled"])
+            self.later.state(["!disabled"])
+            self.bar.pack_forget()
+            self.status.config(text=str(result), fg=BAD)
+            return
+        self.bar["value"] = 100
+        self.status.config(text="Installed. Restarting…", fg=GOOD)
+        try:
+            updater.restart(result, sys.argv[1:])
+        except OSError as e:
+            self.status.config(text=f"Installed v{self.release.version}. Start Grade Tracker again to use it ({e}).",
+                               fg=WARN)
+            return
+        app.root.after(400, app.root.destroy)
+
+
 class SettingsDialog(Dialog):
-    """Term name, target letters, the letter scale, and where the data lives."""
+    """Term name, target letters, the letter scale, updates, and where the data lives."""
 
     def __init__(self, app: App):
-        super().__init__(app, "Settings", 640, 640)
+        super().__init__(app, "Settings", 640, 690)
         px = app.px
         b = self.body
         data = app.lib.load_data()
@@ -1917,6 +2078,10 @@ class SettingsDialog(Dialog):
                                                          for v in r) for r in rows))
         ttk.Label(b, text="A course whose syllabus gives its own cutoffs keeps them; the grade points here drive the GPA.",
                   style="Hint.TLabel", wraplength=px(560), justify="left").pack(anchor="w", pady=(px(3), 0))
+
+        self.check_updates = tk.BooleanVar(value=data.get("check_updates", True))
+        ttk.Checkbutton(b, text="Check GitHub for a new version when Grade Tracker starts",
+                        variable=self.check_updates).pack(anchor="w", pady=(px(12), 0))
 
         links = ttk.Frame(b, style="Flat.TFrame")
         links.pack(fill="x", pady=(px(14), 0))
@@ -1956,6 +2121,7 @@ class SettingsDialog(Dialog):
         data["term"] = self.term.get().strip()
         data["targets"] = letters
         data["scale"] = scale
+        data["check_updates"] = bool(self.check_updates.get())
         try:
             g.GradeBook(data)
         except (g.GradeError, ValueError) as e:
@@ -1988,8 +2154,15 @@ def main(argv=None):
             root.attributes("-alpha", 0.0)
         except tk.TclError:
             fade = False
+    updater.cleanup()   # the .exe an earlier update replaced
+    lib = Library(args.data)
     try:
-        app = App(root, Library(args.data), calm=calm)
+        wanted = lib.load_data().get("check_updates", True)
+    except g.GradeError:
+        wanted = True
+    check = wanted and os.environ.get("GRADE_TRACKER_NO_UPDATE_CHECK", "") in ("", "0")
+    try:
+        app = App(root, lib, calm=calm, check_updates=check)
         app.show_view(args.view)
     except Exception:
         messagebox.showerror("Grade Tracker", traceback.format_exc())

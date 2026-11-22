@@ -20,6 +20,15 @@ jobs:
         with:
           python-version: "3.13"
 
+      - name: Check the tag matches the app's version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: python
+        run: |
+          import gradetracker, sys
+          tag = "${{ github.ref_name }}"
+          if tag != "v" + gradetracker.__version__:
+              sys.exit(f"Tag {tag} doesn't match __version__ {gradetracker.__version__}: the app would keep offering itself as an update.")
+
       - name: Install PyInstaller
         run: python -m pip install -r packaging/requirements-build.txt
 
