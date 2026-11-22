@@ -92,7 +92,8 @@ def documents_dir() -> Path:
 
 
 class App:
-    def __init__(self, root: tk.Tk, lib: Library, calm: bool = False, check_updates: bool = False):
+    def __init__(self, root: tk.Tk, lib: Library, calm: bool = False, check_updates: bool = False,
+                 just_updated: bool = False):
         self.root, self.lib = root, lib
         self.jobs = queue.Queue()  # (callback, result) from background threads, run on Tk's thread
         self.release = None        # a newer release found on GitHub
@@ -123,7 +124,9 @@ class App:
         self.reload()
         self.show_view("marks")
         root.bind("<FocusIn>", self.on_focus)
-        if check_updates:
+        if just_updated:
+            root.after(900, self.welcome_back)
+        elif check_updates:
             root.after(1500, lambda: self.check_for_update(quiet=True))
 
     def px(self, n):
@@ -1757,6 +1760,23 @@ class App:
         self.anim.run("update-pulse", 1800, step, ease=lambda t: t,
                       done=lambda: s.configure("Update.TButton", background=MINT))
 
+    def welcome_back(self):
+        """First start after an in-app update: come to the front and say it worked."""
+        r = self.root
+        try:
+            r.deiconify()
+            r.lift()
+            r.attributes("-topmost", True)
+            r.after(400, lambda: r.attributes("-topmost", False))
+            r.focus_force()
+        except tk.TclError:
+            pass
+        self.update_btn.config(text=f"v{__version__}  ✓", style="Version.TButton")
+        self.toast.show(f"Updated to Grade Tracker v{__version__}. Your courses and marks are all here.",
+                        MINT, icon="✓", ms=6000)
+        r.after(5000, updater.cleanup)   # the old copy may still have been closing at startup
+        r.after(8000, lambda: None if self.release else self.update_btn.config(text=f"v{__version__}"))
+
     def on_update_click(self):
         if self.updating:
             return
@@ -2155,6 +2175,7 @@ def main(argv=None):
             root.attributes("-alpha", 0.0)
         except tk.TclError:
             fade = False
+    updated = updater.just_updated()
     updater.cleanup()   # the .exe an earlier update replaced
     lib = Library(args.data)
     try:
@@ -2163,7 +2184,7 @@ def main(argv=None):
         wanted = True
     check = wanted and os.environ.get("GRADE_TRACKER_NO_UPDATE_CHECK", "") in ("", "0")
     try:
-        app = App(root, lib, calm=calm, check_updates=check)
+        app = App(root, lib, calm=calm, check_updates=check, just_updated=updated)
         app.show_view(args.view)
     except Exception:
         messagebox.showerror("Grade Tracker", traceback.format_exc())

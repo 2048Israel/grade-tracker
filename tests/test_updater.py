@@ -98,8 +98,10 @@ class Swap(unittest.TestCase):
         old = self.exe.with_name("GradeTracker.exe.old")
         self.assertEqual(old.read_bytes(), b"old version")
         if sys.platform == "win32":
+            self.assertTrue(updater.just_updated())      # the next start says "Updated to ..."
             updater.cleanup()
             self.assertFalse(old.exists())
+            self.assertFalse(updater.just_updated())     # ...but only that once
 
     def test_a_corrupt_download_is_rejected(self):
         release = updater.Release(release_json())

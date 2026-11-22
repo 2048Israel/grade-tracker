@@ -124,6 +124,9 @@ class Window(Folder):
             self.assertIn("Update", app.update_btn.cget("text"))
             self.assertEqual(app.release.version, "99.0.0")
             gui.UpdateDialog(app, app.release).destroy()
+            app.welcome_back()
+            root.update()
+            self.assertIn("✓", app.update_btn.cget("text"))
             for view in ("marks", "gpa", "past"):
                 app.show_view(view)
                 root.update()

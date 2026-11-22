@@ -139,6 +139,19 @@ def restart(exe: Path, args) -> None:
     subprocess.Popen([str(exe), *args], env=env, close_fds=True, creationflags=flags, cwd=str(exe.parent))
 
 
+def just_updated(max_age: float = 600) -> bool:
+    """True when this .exe replaced an older one moments ago: the replaced copy is still beside it, and
+    this file was written (downloaded) in the last few minutes. Checked before cleanup() deletes it."""
+    if not can_self_update():
+        return False
+    exe = app_path()
+    try:
+        fresh = time.time() - exe.stat().st_mtime < max_age
+    except OSError:
+        return False
+    return fresh and any(exe.parent.glob(exe.name + ".*old"))
+
+
 def cleanup() -> None:
     """Delete what a previous update left behind (the replaced .exe, a half-finished download)."""
     if not can_self_update():
